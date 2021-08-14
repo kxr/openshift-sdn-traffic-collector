@@ -69,6 +69,12 @@ builtin type -P oc &> /dev/null \
 OC_USER=$(oc whoami 2> /dev/null) \
     || err "oc not authenticated"
 
+# Ensure nodes are present
+for node in $(echo -e "${S_NODE}\n${C_NODE}" | uniq); do
+    oc get node "${node}" &> /dev/null \
+        || err "Node ${node} not found"
+done
+
 # Ensure that current user can create project
 oc auth can-i create project &> /dev/null \
     || err "Current user (${OC_USER}) cannot create subscription in ns/openshift-operators"
