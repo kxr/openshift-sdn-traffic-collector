@@ -16,12 +16,12 @@
 #   7- Collect the collected logs.
 #
 # Following log files are collected:
-#   serving-pod-tcpdump.pcap: tcpdump of eth0 interface from inside the pod.
-#   veth*.pcap: tcpdump of the serving/client pod from the host interface.
+#   *-pod-tcpdump.pcap: tcpdump of eth0 interface from inside the pod.
+#   veth*-tcpdump.pcap: tcpdump of the serving/client pod from the host interface.
 #   tun0-tcpdump.pcap: tcpdump of tun0 interface on the hosts.
 #   web-server.log: Python webserver logs for each curl received.
 #   curl.log: verbose curl ouptut for each curl call
-#   *.pod.log files: Runtime info from the pod/script.
+#   *.pod.log files: Runtime info from the pods/scripts.
 #   iflink_*: iflink number of the pod interface (ignore)
 #   
 # Author: Khizer Naeem (knaeem@redhat.com)
@@ -249,7 +249,7 @@ spec:
         ifl=\$(cat \${iflink})
         veth=\$(grep -wR "\${ifl}" /sys/class/net/veth*/ifindex | cut -d "/" -f5)
         echo "Starting \${veth} traffic capture at \$(date)" >> "${HOST_TMPDIR}/host_capture_${node}.pod.log"
-        tcpdump -nn -i "\${veth}" -w "${HOST_TMPDIR}/\${veth}.pcap" &
+        tcpdump -nn -i "\${veth}" -w "${HOST_TMPDIR}/\${veth}-tcpdump.pcap" &
       done
       while [ ! -f "/host/tmp/stop" ]; do continue; done
       killall tcpdump
