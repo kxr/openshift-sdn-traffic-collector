@@ -21,7 +21,7 @@
 #   tun0-tcpdump.pcap: tcpdump of tun0 interface on the hosts.
 #   web-server.log: Python webserver logs for each curl received.
 #   curl.log: verbose curl ouptut for each curl call
-#   *.pod.log files: Runtime info from the pods/scripts.
+#   *.run.log files: Runtime info from the pods/scripts.
 #   iflink_*: iflink number of the pod interface (ignore)
 #   
 # Author: Khizer Naeem (knaeem@redhat.com)
@@ -122,20 +122,20 @@ spec:
     - |
       rm -f /host/tmp/start; rm -f /host/tmp/stop
       mkdir -p "${HOST_TMPDIR}"
-      echo "===> Running \$(hostname) on ${S_NODE} at \$(date)" > "${HOST_TMPDIR}/serving-pod.pod.log"
-      echo "===> ip addr on this pod shows:" >> "${HOST_TMPDIR}/serving-pod.pod.log"
-      ip a >> "${HOST_TMPDIR}/serving-pod.pod.log"
+      echo "===> Running \$(hostname) on ${S_NODE} at \$(date)" > "${HOST_TMPDIR}/serving-pod.run.log"
+      echo "===> ip addr on this pod shows:" >> "${HOST_TMPDIR}/serving-pod.run.log"
+      ip a >> "${HOST_TMPDIR}/serving-pod.run.log"
       cat /sys/class/net/eth0/iflink >> "${HOST_TMPDIR}/iflink_serving-pod"      
       mkdir /tmp/http
       echo "This is webserver on pod \$(hostname) on node ${S_NODE}" > /tmp/http/index.html
       cd /tmp/http
       python -u -m http.server 8000 &> "${HOST_TMPDIR}/web-server.log" &
       while [ ! -f "/host/tmp/start" ]; do continue; done
-      echo "Starting traffic simulation at \$(date)" >> "${HOST_TMPDIR}/serving-pod.pod.log"
-      tcpdump -nn -i any -w "${HOST_TMPDIR}/serving-pod-tcpdump.pcap" &
+      echo "Starting traffic simulation at \$(date)" >> "${HOST_TMPDIR}/serving-pod.run.log"
+      tcpdump -nn -i any -w "${HOST_TMPDIR}/serving-pod-tcpdump.pcap" &>> "${HOST_TMPDIR}/serving-pod.run.log" &
       while [ ! -f "/host/tmp/stop" ]; do continue; done
       killall tcpdump
-      echo "Stopped traffic simulation at \$(date)" >> "${HOST_TMPDIR}/serving-pod.pod.log"
+      echo "Stopped traffic simulation at \$(date)" >> "${HOST_TMPDIR}/serving-pod.run.log"
       killall -s SIGINT python
       sync
       exit 0
@@ -181,22 +181,22 @@ spec:
     - |
       rm -f /host/tmp/start; rm -f /host/tmp/stop
       mkdir -p "${HOST_TMPDIR}"
-      echo "===> Running \$(hostname) on ${C_NODE} at \$(date)" > "${HOST_TMPDIR}/client-pod.pod.log"
-      echo "===> ip addr on this pod shows:" >> "${HOST_TMPDIR}/client-pod.pod.log"
-      ip a >> "${HOST_TMPDIR}/client-pod.pod.log"
+      echo "===> Running \$(hostname) on ${C_NODE} at \$(date)" > "${HOST_TMPDIR}/client-pod.run.log"
+      echo "===> ip addr on this pod shows:" >> "${HOST_TMPDIR}/client-pod.run.log"
+      ip a >> "${HOST_TMPDIR}/client-pod.run.log"
       cat /sys/class/net/eth0/iflink >> "${HOST_TMPDIR}/iflink_client-pod"
       s_ip=\$(oc get pod serving-pod -n ${PROJECT_NAME} -o jsonpath='{.status.podIP}')
-      echo "I will be curling \${s_ip}" >> "${HOST_TMPDIR}/client-pod.pod.log"
+      echo "I will be curling \${s_ip}" >> "${HOST_TMPDIR}/client-pod.run.log"
       while [ ! -f "/host/tmp/start" ]; do continue; done
-      echo "Starting traffic simulation at \$(date)" >> "${HOST_TMPDIR}/client-pod.pod.log"
-      tcpdump -nn -i any -w "${HOST_TMPDIR}/client-pod-tcpdump.pcap" &
+      echo "Starting traffic simulation at \$(date)" >> "${HOST_TMPDIR}/client-pod.run.log"
+      tcpdump -nn -i any -w "${HOST_TMPDIR}/client-pod-tcpdump.pcap" &>> "${HOST_TMPDIR}/client-pod.run.log" &
       while [ ! -f "/host/tmp/stop" ]; do
         echo "===> curl -v \${s_ip}:8000 at \$(date)" >> "${HOST_TMPDIR}/curl.log"
         curl -qsv "\${s_ip}:8000" &>> "${HOST_TMPDIR}/curl.log"
         sleep 1
       done
       killall tcpdump
-      echo "Stopped traffic simulation at \$(date)" >> "${HOST_TMPDIR}/client-pod.pod.log"
+      echo "Stopped traffic simulation at \$(date)" >> "${HOST_TMPDIR}/client-pod.run.log"
       sync
       exit 0
     securityContext:
@@ -245,21 +245,21 @@ spec:
     - |
       rm -f /host/tmp/start; rm -f /host/tmp/stop
       mkdir -p "${HOST_TMPDIR}"
-      echo "Running \$(hostname) on ${node} at \$(date)" > "${HOST_TMPDIR}/host_capture_${node}.pod.log"
-      echo "ip addr on this pod shows:" >> "${HOST_TMPDIR}/host_capture_${node}.pod.log"
-      ip a >> "${HOST_TMPDIR}/host_capture_${node}.pod.log"
+      echo "Running \$(hostname) on ${node} at \$(date)" > "${HOST_TMPDIR}/host_capture_${node}.run.log"
+      echo "ip addr on this pod shows:" >> "${HOST_TMPDIR}/host_capture_${node}.run.log"
+      ip a >> "${HOST_TMPDIR}/host_capture_${node}.run.log"
       while [ ! -f "/host/tmp/start" ]; do continue; done
-      echo "Starting tun0 traffic capture at \$(date)" >> "${HOST_TMPDIR}/host_capture_${node}.pod.log"
-      tcpdump -nn -i tun0 -w "${HOST_TMPDIR}/tun0-tcpdump.pcap" &
+      echo "Starting tun0 traffic capture at \$(date)" >> "${HOST_TMPDIR}/host_capture_${node}.run.log"
+      tcpdump -nn -i tun0 -w "${HOST_TMPDIR}/tun0-tcpdump.pcap" &>> "${HOST_TMPDIR}/host_capture_${node}.run.log" &
       for iflink in ${HOST_TMPDIR}/iflink_*; do
         ifl=\$(cat \${iflink})
         veth=\$(grep -wR "\${ifl}" /sys/class/net/veth*/ifindex | cut -d "/" -f5)
-        echo "Starting \${veth} traffic capture at \$(date)" >> "${HOST_TMPDIR}/host_capture_${node}.pod.log"
-        tcpdump -nn -i "\${veth}" -w "${HOST_TMPDIR}/\${veth}-tcpdump.pcap" &
+        echo "Starting \${veth} traffic capture at \$(date)" >> "${HOST_TMPDIR}/host_capture_${node}.run.log"
+        tcpdump -nn -i "\${veth}" -w "${HOST_TMPDIR}/\${veth}-tcpdump.pcap" &>> "${HOST_TMPDIR}/host_capture_${node}.run.log" &
       done
       while [ ! -f "/host/tmp/stop" ]; do continue; done
       killall tcpdump
-      echo "Stopped host traffic capture at \$(date)" >> "${HOST_TMPDIR}/host_capture_${node}.pod.log"
+      echo "Stopped host traffic capture at \$(date)" >> "${HOST_TMPDIR}/host_capture_${node}.run.log"
       sync
       sleep infinity
       exit 0
@@ -310,4 +310,7 @@ for node in $(echo -e "${S_NODE}\n${C_NODE}" | uniq); do
   oc -n ${PROJECT_NAME} exec "${host_pod}" -- tar -P -C /host/tmp -cf - "${DIR_NAME}" | tar -xf - -C "${DIR_NAME}/${node}" && echo "Done ($node)"
   oc -n ${PROJECT_NAME} exec "${host_pod}" -- killall sleep
 done
+oc get pods -n ${PROJECT_NAME} -o wide > "${DIR_NAME}/pods-o-wide.txt"
+oc get events -n ${PROJECT_NAME} > "${DIR_NAME}/events.txt"
+
 echo
