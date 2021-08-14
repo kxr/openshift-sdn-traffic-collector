@@ -151,7 +151,7 @@ EOF
 
 echo
 echo "===> Waiting for serving pod to become ready:"
-oc wait -n ${PROJECT_NAME} --for=condition=Ready pod/serving-pod
+oc wait --timeout="1h" -n ${PROJECT_NAME} --for=condition=Ready pod/serving-pod
 
 echo
 echo "===> Creating client pod on ${C_NODE}:"
@@ -211,7 +211,7 @@ EOF
 
 echo
 echo "===> Waiting for client pod to become ready:"
-oc wait -n ${PROJECT_NAME} --for=condition=Ready pod/client-pod
+oc wait --timeout="1h" -n ${PROJECT_NAME} --for=condition=Ready pod/client-pod
 
 
 # tun0 Traffic Capture on Hosts
@@ -275,7 +275,7 @@ EOF
 
 echo
 echo "===> Waiting for host capture pod to become ready:"
-oc wait -n ${PROJECT_NAME} --for=condition=Ready pod/host-capture-${node}
+oc wait --timeout="1h" -n ${PROJECT_NAME} --for=condition=Ready pod/host-capture-${node}
 done
 
 sleep 5
