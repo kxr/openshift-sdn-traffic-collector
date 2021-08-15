@@ -1,7 +1,7 @@
 #!/bin/bash
 #
-# A script to collect tcpdumps of traffic between two pods.
-# Currently only tested on OpenShiftSDN.
+# A script to collect tcpdumps of traffic between two pods/nodes.
+# Currently only tested on OpenShift 4.x / OpenShiftSDN.
 #
 # DO NOT RUN IN PRODUCTION
 #
@@ -105,7 +105,8 @@ done
 
 # Show help if -h/--help is passed
 if [ -n "${SHOW_HELP}" ]; then
-    cat "${SDIR}/README.md"
+    cat "${SDIR}/README.txt" 2> /dev/null \
+        || echo "See: https://github.com/kxr/openshift-sdn-traffic-collector"
     exit 0
 fi
 
