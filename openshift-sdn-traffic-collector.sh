@@ -15,7 +15,7 @@
 #   6- Send stop signal to the pods that will trigger the pods to stop the simulation/collection.
 #   7- Collect the collected logs.
 #
-# Following log files are collected:
+# Following log files are collected from each node:
 #   *-pod-tcpdump.pcap: tcpdump of eth0 interface from inside the pod.
 #   veth*-tcpdump.pcap: tcpdump of the serving/client pod from the host interface.
 #   tun0-tcpdump.pcap: tcpdump of tun0 interface on the hosts.
