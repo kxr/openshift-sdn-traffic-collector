@@ -19,6 +19,8 @@
 #   *-pod-tcpdump.pcap: tcpdump of eth0 interface from inside the pod.
 #   veth*-tcpdump.pcap: tcpdump of the serving/client pod from the host interface.
 #   tun0-tcpdump.pcap: tcpdump of tun0 interface on the hosts.
+#   *-def_int-tcpdump.pcap: tcpdump of default interface on the hosts.
+#   ovs-info.txt: ovs bridge and flows on the hosts.
 #   web-server.log: Python webserver logs for each curl received.
 #   curl.log: verbose curl ouptut for each curl call
 #   *.run.log files: Runtime info from the pods/scripts.
@@ -27,28 +29,7 @@
 # Author: Khizer Naeem (knaeem@redhat.com)
 # 14 Aug 2021
 
-# Project Name to be used - Should not exist
-PROJECT_NAME="sdn-traffic-bw-nodes"
-
-# Serving Node name (pod with a webserver will run on this node)
-S_NODE="worker-1.aram4748.h1.kxr.me"
-# Client Node name (pod on this node will curl the pod on serving node)
-C_NODE="worker-2.aram4748.h1.kxr.me"
-# Note: Same node in S_NODE & C_NODE should work
-
-# Duration for traffic simulation/capture
-# Any value that can be passed to `sleep <..>`
-DURATION="5m"
-
-#
-# Donot Change below, unless you know what you are doing
-#
-
-IMG_NET_TOOLS="registry.redhat.io/openshift4/network-tools-rhel8"
-TS=$(date +%d%h%y-%H%M%S)
-# Directory variables should not have / at the end
-DIR_NAME="${PROJECT_NAME}-${TS}"
-HOST_TMPDIR="/host/tmp/${DIR_NAME}"
+export SDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 
 err() {
     echo; echo;
@@ -57,9 +38,138 @@ err() {
     echo; exit 1;
 }
 
+
+while [[ $# -gt 0 ]]
+do
+key="$1"
+case $key in
+    -s|--serving-node)
+    S_NODE="$2"
+    shift
+    shift
+    ;;
+    -s=*|--serving-node=*)
+    S_NODE="${key#*=}"
+    shift
+    ;;
+    -c|--client-node)
+    C_NODE="$2"
+    shift
+    shift
+    ;;
+    -c=*|--client-node=*)
+    C_NODE="${key#*=}"
+    shift
+    ;;
+    -d|--duration)
+    DURATION="$2"
+    shift
+    shift
+    ;;
+    -d=*|--duration=*)
+    DURATION="${key#*=}"
+    shift
+    ;;
+    -p|--project)
+    PROJECT_NAME="$2"
+    shift
+    shift
+    ;;
+    -p=*|--project=*)
+    PROJECT_NAME="${key#*=}"
+    shift
+    ;;
+    -i|--image)
+    IMG_NET_TOOLS="$2"
+    shift
+    shift
+    ;;
+    -i=*|--image=*)
+    IMG_NET_TOOLS="${key#*=}"
+    shift
+    ;;
+    -h|--help)
+    SHOW_HELP="yes"
+    shift
+    ;;
+    -y|--yes)
+    YES="yes"
+    shift
+    ;;
+    *)
+    echo "ERROR: Invalid argument $key"
+    exit 1
+    ;;
+esac
+done
+
+# Show help if -h/--help is passed
+if [ -n "${SHOW_HELP}" ]; then
+    cat "${SDIR}/README.md"
+    exit 0
+fi
+
+# Set the default project name if not set
+if [ -z "${PROJECT_NAME}" ]; then
+    echo "===> Setting default project name:"
+    PROJECT_NAME="sdn-traffic-bw-nodes"
+    echo "Done (${PROJECT_NAME})"
+    echo
+fi
+
+# Random node selection if not set
+if [ -z "${S_NODE}" -o -z "${C_NODE}" ]; then
+    
+    READY_NODES=($(oc get nodes -o 'go-template={{range .items}}{{$ready:=""}}{{range .status.conditions}}{{if eq .type "Ready"}}{{$ready = .status}}{{end}}{{end}}{{if eq $ready "True"}}{{.metadata.name}}{{" "}}{{end}}{{end}}'))
+    READY_NODES=(${READY_NODES[@]/$S_NODE})
+    READY_NODES=(${READY_NODES[@]/$C_NODE})
+    test "${#READY_NODES[@]}" -lt "1" && err "Not enough ready node(s) found!"
+
+    # Pick random serving node if not set
+    if [ -z "${S_NODE}" ]; then
+        echo "===> Selecting random serving node:"
+        S_NODE=${READY_NODES[ $RANDOM % ${#READY_NODES[@]} ]}
+        READY_NODES=(${READY_NODES[@]/$S_NODE})
+        echo "Done (${S_NODE})"
+        echo
+    fi
+
+    # Pick random client node if not set
+    if [ -z "${C_NODE}" ]; then
+        echo "===> Selected random client node:"
+        C_NODE=${READY_NODES[ $RANDOM % ${#READY_NODES[@]} ]}
+        echo "Done (${C_NODE})"
+        echo
+    fi
+fi
+
+# Set default duration if not set
+if [ -z "${DURATION}" ]; then
+    echo "===> Setting default testing duration:"
+    DURATION="5m"
+    echo "Done (${DURATION})"
+    echo
+
+fi
+
+# Set default image if not set
+if [ -z "${IMG_NET_TOOLS}" ]; then
+    echo "===> Setting default network-tools image:"
+    IMG_NET_TOOLS="registry.redhat.io/openshift4/network-tools-rhel8"
+    echo "Done (${IMG_NET_TOOLS})"
+    echo
+fi
+
+# Timestamp
+TS=$(date +%d%h%y-%H%M%S)
+# Directory variables should not have / at the end
+DIR_NAME="${PROJECT_NAME}-${TS}"
+HOST_TMPDIR="/host/tmp/${DIR_NAME}"
+
+
 # Ensure we can make new directory
 mkdir "${DIR_NAME}" && rmdir "${DIR_NAME}" \
-  || err "Cannot make new directory in current working directory!"
+    || err "Cannot make new directory in current working directory!"
 
 # Ensure oc binary is present
 builtin type -P oc &> /dev/null \
@@ -69,10 +179,13 @@ builtin type -P oc &> /dev/null \
 OC_USER=$(oc whoami 2> /dev/null) \
     || err "oc not authenticated"
 
-# Ensure nodes are present
+# Ensure nodes are present and ready
 for node in $(echo -e "${S_NODE}\n${C_NODE}" | uniq); do
     oc get node "${node}" &> /dev/null \
-        || err "Node ${node} not found"
+        || err "Node ${node} not found!"
+    ready=$(oc get node ${node} -o jsonpath='{.status.conditions[?(@.type == "Ready")].status}')
+    test "$ready" = "True" \
+        || err "Node ${node} not Ready!"
 done
 
 # Ensure that current user can create project
@@ -81,27 +194,49 @@ oc auth can-i create project &> /dev/null \
 
 # Ensure we don't already have the project
 oc get project "${PROJECT_NAME}" -o name &> /dev/null \
-    && err "project ${PROJECT_NAME} already exists. Please clean up before running again."
-    
-# Create project
+    && err "project ${PROJECT_NAME} already exists." \
+    "Please clean up before running again or use a different project name (-p/--project)"
+
+# Show summary of selection
+echo "===> Summary:"
 echo
-echo "===> Creating new project ${PROJECT_NAME}:"
-oc new-project "${PROJECT_NAME}" &> /dev/null && echo "Done" \
-  || err "Error creating new project ${PROJECT_NAME}"
+echo
+echo -e "\tSERVING NODE:    ${S_NODE}"
+echo -e "\tCLIENT NODE:     ${C_NODE}"
+echo -e "\tPROJECT NAME:    ${PROJECT_NAME}"
+echo -e "\tTEST DURATION:   ${DURATION}"
+echo -e "\tCONTAINER IMAGE: ${IMG_NET_TOOLS}"
+echo -e "\tTIME STAMP:      ${TS}"
+echo
+echo
 
-# Give privileged scc to default sa 
+# Check if we can continue
+if [ -z "${YES}" ]; then
+    echo
+    echo -n "Press [Enter] to continue, [Ctrl]+C to abort: "
+    read userinput;
+    echo
+fi
+
+
+# Create project
+echo "===> Creating new project:"
+oc new-project "${PROJECT_NAME}" &> /dev/null \
+    || err "Error creating new project ${PROJECT_NAME}"
+echo "Done (${PROJECT_NAME})"
+echo
+
+# Add privileges to default sa
+echo "===> Adding privileges to default service account"
 oc adm policy add-scc-to-user privileged -z default -n ${PROJECT_NAME} &> /dev/null \
-    || err "Cannot add privileged scc to service account default"
-
-# Give view role to default sa
-oc adm  policy add-role-to-user view -z default -n ${PROJECT_NAME} &> /dev/null \
-    || err "Cannot add view role to service account default"
-
-
-
+    || err "Cannot add privileged scc to default service account"
+echo "Done (scc: privilged)"
+oc adm policy add-role-to-user view -z default -n ${PROJECT_NAME} &> /dev/null \
+    || err "Cannot add view role to default service account"
+echo "Done (role: view)" 
+echo
 
 # Serving Pod on Serving Node
-echo
 echo "===> Creating serving pod on ${S_NODE}:"
 cat <<EOF | oc create -f - 
 apiVersion: v1
@@ -154,14 +289,16 @@ spec:
       path: /
       type: Directory
 EOF
-
+test "$?" -eq "0" || err "Failed creating serving pod"
 echo
+
 echo "===> Waiting for serving pod to become ready:"
-oc wait --timeout="1h" -n ${PROJECT_NAME} --for=condition=Ready pod/serving-pod
-
+oc wait --timeout="1h" -n ${PROJECT_NAME} --for=condition=Ready pod/serving-pod \
+    || err "Timed out waiting for serving pod to become ready"
 echo
-echo "===> Creating client pod on ${C_NODE}:"
+
 # Client Pod on Client Node
+echo "===> Creating client pod on ${C_NODE}:"
 cat <<EOF | oc create -f -
 apiVersion: v1
 kind: Pod
@@ -214,15 +351,17 @@ spec:
       path: /
       type: Directory
 EOF
-
+test "$?" -eq "0" || err "Failed creating client pod"
 echo
+
 echo "===> Waiting for client pod to become ready:"
-oc wait --timeout="1h" -n ${PROJECT_NAME} --for=condition=Ready pod/client-pod
-
-
-# tun0 Traffic Capture on Hosts
-for node in $(echo -e "${S_NODE}\n${C_NODE}" | uniq); do
+oc wait --timeout="1h" -n ${PROJECT_NAME} --for=condition=Ready pod/client-pod \
+    || err "Timed out waiting for serving pod to become ready"
 echo
+
+
+# Traffic Capture on Hosts
+for node in $(echo -e "${S_NODE}\n${C_NODE}" | uniq); do
 echo "===> Creating host capture pod on ${node}:"
 cat <<EOF | oc create -f -
 apiVersion: v1
@@ -248,7 +387,16 @@ spec:
       echo "Running \$(hostname) on ${node} at \$(date)" > "${HOST_TMPDIR}/host_capture_${node}.run.log"
       echo "ip addr on this pod shows:" >> "${HOST_TMPDIR}/host_capture_${node}.run.log"
       ip a >> "${HOST_TMPDIR}/host_capture_${node}.run.log"
+      list_br=\$(chroot /host ovs-vsctl list-br)
+      echo "### ovs-vsctl list-br: \${list_br}" &>> "${HOST_TMPDIR}/ovs-info.txt"
+      echo "### ovs-ofctl -O OpenFlow13 dump-ports-desc \${list_br}" &>> "${HOST_TMPDIR}/ovs-info.txt"
+      chroot /host ovs-ofctl -O OpenFlow13 dump-ports-desc "\${list_br}" &>> "${HOST_TMPDIR}/ovs-info.txt"
+      echo "### ovs-ofctl -O OpenFlow13 dump-flows \${list_br}" &>> "${HOST_TMPDIR}/ovs-info.txt"
+      chroot /host ovs-ofctl -O OpenFlow13 dump-flows "\${list_br}" &>> "${HOST_TMPDIR}/ovs-info.txt"
       while [ ! -f "/host/tmp/start" ]; do continue; done
+      def_int=\$(awk '\$2 == 00000000 { print \$1 }' /proc/net/route)
+      echo "Starting \${def_int} traffic capture at \$(date)" >> "${HOST_TMPDIR}/host_capture_${node}.run.log"
+      tcpdump -nn -i "\${def_int}" -w "${HOST_TMPDIR}/\${def_int}-def_int-tcpdump.pcap" &>> "${HOST_TMPDIR}/host_capture_${node}.run.log" &
       echo "Starting tun0 traffic capture at \$(date)" >> "${HOST_TMPDIR}/host_capture_${node}.run.log"
       tcpdump -nn -i tun0 -w "${HOST_TMPDIR}/tun0-tcpdump.pcap" &>> "${HOST_TMPDIR}/host_capture_${node}.run.log" &
       for iflink in ${HOST_TMPDIR}/iflink_*; do
@@ -278,39 +426,65 @@ spec:
       path: /
       type: Directory
 EOF
-
+test "$?" -eq "0" || err "Failed creating host capture pod on ${node}"
 echo
+
 echo "===> Waiting for host capture pod to become ready:"
-oc wait --timeout="1h" -n ${PROJECT_NAME} --for=condition=Ready pod/host-capture-${node}
+oc wait --timeout="1h" -n ${PROJECT_NAME} --for=condition=Ready "pod/host-capture-${node}" \
+    || err "Timed out waiting for serving pod to become ready"
+echo
 done
 
 sleep 5
 
-echo
 echo "===> Sending start signal:"
-oc -n ${PROJECT_NAME} exec serving-pod -- touch /host/tmp/start && echo "Done (serving-pod)"
-oc -n ${PROJECT_NAME} exec client-pod -- touch /host/tmp/start && echo "Done (client-pod)"
-
+for node in $(echo -e "${S_NODE}\n${C_NODE}" | uniq); do
+    host_pod="host-capture-${node}"
+    (oc -n ${PROJECT_NAME} exec ${host_pod} -- touch /host/tmp/start && echo "Done (${node})") &
+done
+wait
 echo
+
 echo "===> Waiting for ${DURATION} while the traffic simulation/capture runs:"
 sleep "${DURATION}" && echo "Done"
-
 echo
+
 echo "====> Sending stop signal:"
-oc -n ${PROJECT_NAME} exec serving-pod -- touch /host/tmp/stop && echo "Done (serving-pod)"
-oc -n ${PROJECT_NAME} exec client-pod -- touch /host/tmp/stop && echo "Done (client-pod)"
-
-sleep 1
-
-echo
-echo "===> Collecting data in local directory ./${DIR_NAME}"
 for node in $(echo -e "${S_NODE}\n${C_NODE}" | uniq); do
-  host_pod="host-capture-${node}"
-  mkdir -p "${DIR_NAME}/${node}"
-  oc -n ${PROJECT_NAME} exec "${host_pod}" -- tar -P -C /host/tmp -cf - "${DIR_NAME}" | tar -xf - -C "${DIR_NAME}/${node}" && echo "Done ($node)"
-  oc -n ${PROJECT_NAME} exec "${host_pod}" -- killall sleep
+    host_pod="host-capture-${node}"
+    (oc -n ${PROJECT_NAME} exec ${host_pod} -- touch /host/tmp/stop && echo "Done (${node})") &
 done
-oc get pods -n ${PROJECT_NAME} -o wide > "${DIR_NAME}/pods-o-wide.txt"
-oc get events -n ${PROJECT_NAME} > "${DIR_NAME}/events.txt"
-
+wait
 echo
+
+echo "===> Waiting for the serving/client pods to complete"
+for pod in "serving-pod" "client-pod"; do
+    while [ $(oc get pods "${pod}" -o jsonpath='{.status.conditions[?(@.type == "Ready")].status}') == "True" ]; do sleep 5; done
+    echo "Done (${pod})"
+done
+echo
+
+echo "===> Collecting data in local directory ./${DIR_NAME}:"
+for node in $(echo -e "${S_NODE}\n${C_NODE}" | uniq); do
+    host_pod="host-capture-${node}"
+    mkdir -p "${DIR_NAME}/${node}"
+    oc -n ${PROJECT_NAME} exec "${host_pod}" -- tar -P -C /host/tmp -cf - "${DIR_NAME}" | tar -xf - -C "${DIR_NAME}/${node}" && echo "Done ($node)"
+    oc -n ${PROJECT_NAME} exec "${host_pod}" -- killall sleep
+done
+echo
+
+echo "===> Waiting for host capture pods to complete:"
+for node in $(echo -e "${S_NODE}\n${C_NODE}" | uniq); do
+    host_pod="host-capture-${node}"
+    while [ $(oc get pods "${host_pod}" -o jsonpath='{.status.conditions[?(@.type == "Ready")].status}') == "True" ]; do sleep 5; done
+    echo "Done (${host_pod})"
+done
+echo
+
+echo "===> Collecting project level info:"
+oc get nodes -o wide > "${DIR_NAME}/nodes-o-wide.txt" && echo "Done (nodes)"
+oc get pods -n ${PROJECT_NAME} -o wide > "${DIR_NAME}/pods-o-wide.txt" && echo "Done (pods)"
+oc get events -n ${PROJECT_NAME} > "${DIR_NAME}/events.txt" && echo "Done (events)"
+echo
+
+echo "END OF SCRIPT"
